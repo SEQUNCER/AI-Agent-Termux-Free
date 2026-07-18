@@ -38,6 +38,7 @@ export async function chat(messages, tools = [], onChunk = null) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let accumulated = { choices: [{ message: { role: 'assistant', content: '' } }] };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -49,15 +50,37 @@ export async function chat(messages, tools = [], onChunk = null) {
         const trimmed = line.trim();
         if (!trimmed || !trimmed.startsWith('data: ')) continue;
         const data = trimmed.slice(6);
-        if (data === '[DONE]') return;
+        if (data === '[DONE]') continue;
         try {
           const parsed = JSON.parse(data);
           const delta = parsed.choices?.[0]?.delta;
-          if (delta) onChunk(delta, parsed);
+          if (!delta) continue;
+          onChunk(delta, parsed);
+
+          if (delta.content) {
+            accumulated.choices[0].message.content += delta.content;
+          }
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              if (tc.id) {
+                accumulated.choices[0].message.tool_calls = accumulated.choices[0].message.tool_calls || [];
+                accumulated.choices[0].message.tool_calls.push({
+                  id: tc.id, type: 'function',
+                  function: { name: tc.function?.name || '', arguments: tc.function?.arguments || '' },
+                });
+              } else {
+                const last = accumulated.choices[0].message.tool_calls?.slice(-1)[0];
+                if (last) {
+                  if (tc.function?.name) last.function.name += tc.function.name;
+                  if (tc.function?.arguments) last.function.arguments += tc.function.arguments;
+                }
+              }
+            }
+          }
         } catch { /* skip malformed chunks */ }
       }
     }
-    return null;
+    return accumulated;
   }
 
   const data = await response.json();

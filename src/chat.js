@@ -99,15 +99,16 @@ function help() {
 }
 
 function fmtArgs(name, a) {
+  if (!a || typeof a !== 'object') return style.dim + '(no args)' + style.reset;
   switch (name) {
-    case 'read_file':   return `${style.underline}${a.path}${style.reset}${a.offset ? ':' + a.offset : ''}`;
-    case 'write_file':  return `${style.underline}${a.path}${style.reset}`;
-    case 'edit_file':   return `${style.underline}${a.path}${style.reset}`;
-    case 'bash':        return `${style.dim}$ ${style.reset}${a.command}`;
-    case 'glob':        return `${style.dim}\u2731 ${style.reset}${a.pattern}`;
-    case 'grep':        return `${style.dim}\u2666 ${style.reset}/${a.pattern}/${a.include || ''}`;
-    case 'web_search':  return `${style.dim}\u2316 ${style.reset}${a.query}`;
-    case 'web_fetch':   return `${style.dim}\u2191 ${style.reset}${a.url}`;
+    case 'read_file':   return `${style.underline}${a.path || '?'}${style.reset}${a.offset ? ':' + a.offset : ''}`;
+    case 'write_file':  return `${style.underline}${a.path || '?'}${style.reset}`;
+    case 'edit_file':   return `${style.underline}${a.path || '?'}${style.reset}`;
+    case 'bash':        return `${style.dim}$ ${style.reset}${a.command || '(no command)'}`;
+    case 'glob':        return `${style.dim}\u2731 ${style.reset}${a.pattern || '?'}`;
+    case 'grep':        return `${style.dim}\u2666 ${style.reset}/${a.pattern || '?'}/${a.include || ''}`;
+    case 'web_search':  return `${style.dim}\u2316 ${style.reset}${a.query || '?'}`;
+    case 'web_fetch':   return `${style.dim}\u2191 ${style.reset}${a.url || '?'}`;
     default: return '';
   }
 }
@@ -163,6 +164,7 @@ export async function startChat() {
 
     let turns = 0;
 
+    try {
     while (turns < 10) {
       turns++;
       let content = '';
@@ -173,7 +175,9 @@ export async function startChat() {
 
       thinkStart(`\u2771 ${mShort}`);
 
-      const resp = await chat(msgs, TOOL_DEFINITIONS, (d) => {
+      let resp;
+      try {
+        resp = await chat(msgs, TOOL_DEFINITIONS, (d) => {
         if (d.content) {
           if (!content) {
             thinkStop();
@@ -192,6 +196,11 @@ export async function startChat() {
           }
         }
       });
+      } catch (e) {
+        thinkStop();
+        process.stdout.write(`\n ${style.red}\u26A0  API error: ${e.message}${style.reset}\n`);
+        resp = null;
+      }
 
       thinkStop();
 
@@ -200,24 +209,37 @@ export async function startChat() {
       if (resp?.choices?.[0]?.message) {
         const m = resp.choices[0].message;
         if (m.content && !content) content = m.content;
-        if (m.tool_calls && !toolCalls.length) toolCalls = m.tool_calls;
+        // Always prefer non-streaming tool_calls — they have complete arguments
+        if (m.tool_calls && m.tool_calls.length) {
+          toolCalls = m.tool_calls.map(tc => ({
+            id: tc.id,
+            fn: { name: tc.function?.name || '', args: tc.function?.arguments || '' }
+          }));
+        }
       }
 
       if (!toolCalls.length) {
         if (content) {
           msgs.push({ role: 'assistant', content });
+          process.stdout.write(`\n`);
           const sepLen = Math.min(36, process.stdout.columns - 4 || 36);
           process.stdout.write(` ${style.dim}${'\u2500'.repeat(sepLen)}${style.reset}\n`);
         }
         break;
       }
 
-      msgs.push({ role: 'assistant', content: content || null, tool_calls: toolCalls });
+      const apiCalls = toolCalls.map(tc => ({
+        id: tc.id || '', type: 'function',
+        function: { name: tc.fn?.name || '', arguments: tc.fn?.args || '' },
+      }));
+      msgs.push({ role: 'assistant', content: content || null, tool_calls: apiCalls });
       const sepLen = Math.min(36, process.stdout.columns - 4 || 36);
       process.stdout.write(`\n ${style.dim}${'\u2500'.repeat(sepLen)}${style.reset}\n`);
 
       for (const tc of toolCalls) {
-        const a = JSON.parse(tc.fn.args);
+        if (!tc?.fn || !tc.fn.name) { process.stdout.write(` ${style.dim}\u2502 ${style.yellow}skip (empty tool call)${style.reset}\n`); continue; }
+        let a = {};
+        try { a = JSON.parse(tc.fn.args?.trim() || '{}'); } catch { a = {}; }
         const d = fmtArgs(tc.fn.name, a);
         const t0 = Date.now();
 
@@ -228,11 +250,13 @@ export async function startChat() {
         const r = await executeToolCall({ id: tc.id, function: { name: tc.fn.name, arguments: tc.fn.args } });
         const elapsed = Date.now() - t0;
 
-        process.stdout.write(`  ${style.dim}${elapsed}ms${style.reset} ${style.green}\u2713${style.reset}\n`);
+        const isErr = r.output.startsWith('Error:');
+        const icon = isErr ? `${style.red}\u26A0${style.reset}` : `${style.green}\u2713${style.reset}`;
+        process.stdout.write(`  ${style.dim}${elapsed}ms${style.reset} ${icon}\n`);
 
         const out = fmtResult(tc.fn.name, r.output);
         for (const l of out.split('\n')) {
-          process.stdout.write(`  ${style.dim}\u2502${style.reset} ${l}\n`);
+          process.stdout.write(`  ${style.dim}\u2502${style.reset} ${isErr ? style.red : ''}${l}${isErr ? style.reset : ''}\n`);
         }
 
         const trunc = r.output.length > 1000 ? r.output.slice(0, 1000) + `\n... (${r.output.length} chars)` : r.output;
@@ -245,6 +269,10 @@ export async function startChat() {
         const sys = msgs[0];
         msgs = [sys, ...msgs.slice(-MAX_HISTORY * 2)];
       }
+    }
+    } catch (e) {
+      thinkStop();
+      process.stdout.write(`\n ${style.red}\u26A0  Error: ${e.message}${style.reset}\n`);
     }
 
     if (turns >= 10) process.stdout.write(`\n ${style.red}\u26A0  max turns${style.reset}\n`);

@@ -13,11 +13,18 @@ function isPathSafe(targetPath) {
 
 export async function executeToolCall(toolCall) {
   const { name, arguments: args } = toolCall.function;
-  const parsed = JSON.parse(args);
+  let parsed;
+  try {
+    const clean = args?.trim() || '{}';
+    parsed = JSON.parse(clean);
+  } catch {
+    return { tool_call_id: toolCall.id, output: `Error: invalid tool arguments: ${(args || '').slice(0, 100)}` };
+  }
 
   try {
     switch (name) {
       case 'read_file': {
+        if (!parsed.path) return { tool_call_id: toolCall.id, output: 'Error: path is required' };
         if (!isPathSafe(parsed.path)) return { tool_call_id: toolCall.id, output: 'Error: Invalid path' };
         const resolved = path.resolve(parsed.path);
         if (!fs.existsSync(resolved)) return { tool_call_id: toolCall.id, output: `Error: File not found: ${parsed.path}` };
@@ -41,6 +48,7 @@ export async function executeToolCall(toolCall) {
       }
 
       case 'write_file': {
+        if (!parsed.path) return { tool_call_id: toolCall.id, output: 'Error: path is required' };
         if (!isPathSafe(parsed.path)) return { tool_call_id: toolCall.id, output: 'Error: Invalid path' };
         const resolved = path.resolve(parsed.path);
         const dir = path.dirname(resolved);
@@ -50,6 +58,7 @@ export async function executeToolCall(toolCall) {
       }
 
       case 'edit_file': {
+        if (!parsed.path) return { tool_call_id: toolCall.id, output: 'Error: path is required' };
         if (!isPathSafe(parsed.path)) return { tool_call_id: toolCall.id, output: 'Error: Invalid path' };
         const resolved = path.resolve(parsed.path);
         if (!fs.existsSync(resolved)) return { tool_call_id: toolCall.id, output: `Error: File not found: ${parsed.path}` };
@@ -63,6 +72,7 @@ export async function executeToolCall(toolCall) {
       }
 
       case 'bash': {
+        if (!parsed.command) return { tool_call_id: toolCall.id, output: 'Error: command is required' };
         try {
           const output = execSync(parsed.command, {
             encoding: 'utf-8',
@@ -77,6 +87,7 @@ export async function executeToolCall(toolCall) {
       }
 
       case 'glob': {
+        if (!parsed.pattern) return { tool_call_id: toolCall.id, output: 'Error: pattern is required' };
         const { globSync } = await import('glob');
         const matches = globSync(parsed.pattern, { dot: true });
         return { tool_call_id: toolCall.id, output: matches.join('\n') || '(no matches)' };
