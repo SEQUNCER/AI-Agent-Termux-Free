@@ -22,7 +22,7 @@ pkg install nodejs git -y
 ### 3. Клонируй или скопируй проект
 
 ```bash
-git clone https://github.com/yourusername/ai-agent-termux
+git clone https://github.com/SEQUNCER/AI-Agent-Termux-Free.git
 cd ai-agent-termux
 ```
 
