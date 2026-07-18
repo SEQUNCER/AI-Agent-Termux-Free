@@ -1,0 +1,23 @@
+{
+  "name": "ai-agent-termux",
+  "version": "1.0.0",
+  "description": "Free AI coding agent CLI — uses OpenRouter free models",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "ai": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "ai",
+    "coding",
+    "agent",
+    "cli"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "glob": "^13.0.6"
+  }
+}
