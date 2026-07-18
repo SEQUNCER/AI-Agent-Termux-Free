@@ -23,7 +23,7 @@ pkg install nodejs git -y
 
 ```bash
 git clone https://github.com/SEQUNCER/AI-Agent-Termux-Free.git
-cd AI-Agent-Termux
+cd AI-Agent-Termux-Free
 ```
 
 Если нет git — скопируй папку вручную через `cp` или `rsync`.
